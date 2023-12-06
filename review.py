@@ -1,14 +1,15 @@
+def get_text_from_data(data, slice_margin):
+    return data[1:-slice_margin-2]
+
+
+def get_label_from_data(data, slice_margin):
+    return data[-slice_margin:]
+
+
 class Review:
-    SLICE_MARGIN = 8
     text = ""
     label = ""
 
-    def __init__(self, data):
-        self.text = self.get_text_from_data(data)
-        self.label = self.get_label_from_data(data)
-
-    def get_text_from_data(self, data):
-        return data[:self.SLICE_MARGIN]
-
-    def get_label_from_data(self, data):
-        return data[-self.SLICE_MARGIN:]
+    def __init__(self, data, slice_margin=8):
+        self.text = get_text_from_data(data, slice_margin)
+        self.label = get_label_from_data(data, slice_margin)
