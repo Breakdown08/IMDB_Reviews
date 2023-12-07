@@ -54,22 +54,16 @@ for review in reviews:
 corpus = Counter(all_words)
 # Отсортируем слова по встречаемости
 corpus_ = sorted(corpus,key=corpus.get,reverse=True)#[:1000]
-print('Самые частые слова: ', corpus_[:10])
 # кодируем каждое слово - присваиваем ему порядковый номер
 vocab_to_int = {w:i+1 for i,w in enumerate(corpus_)}
-print('Уникальных слов: ', len(vocab_to_int))
 
 # Кодируем все отзывы: последовательность слов --> последовательность чисел
 encoded_texts = []
 for sent in all_texts:
   encoded_texts.append([vocab_to_int[word] for word in sent.lower().split()
                                   if word in vocab_to_int.keys()])
-print('Пример закодированного ревью: ', encoded_texts[0])
 
 encoded_labels = [1 if label == "positive" else 0 for label in labels]
-
-print('Число отзывов и число лейблов: ', len(all_texts), len(labels))
-
 
 def pad_text(encoded_texts, seq_length):
     padded = []
@@ -83,7 +77,6 @@ def pad_text(encoded_texts, seq_length):
 
 
 padded_texts = pad_text(encoded_texts, seq_length=200)
-print('Пример padded review: ', padded_texts[0])
 
 
 train_set = TensorDataset(torch.from_numpy(padded_texts[:20000]), torch.from_numpy(np.array(encoded_labels[:20000])))
@@ -92,13 +85,11 @@ val_set = TensorDataset(torch.from_numpy(padded_texts[20000:]), torch.from_numpy
 batch_size = 50
 
 # train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-5000, 5000])
-print('Размер обучающего и валидационного датасета: ', len(train_set), len(val_set))
 loaders = {'training': DataLoader(train_set, batch_size, pin_memory=True,num_workers=2, shuffle=True),
            'validation':DataLoader(val_set, batch_size, pin_memory=True,num_workers=2, shuffle=False)}
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(device)
 
 
 class SentimentRNN(nn.Module):
@@ -147,6 +138,14 @@ embedding_dim = 100
 hidden_dim = 256
 num_layers = 1
 model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
+
+# # Создайте новый экземпляр модели с теми же параметрами
+# loaded_model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
+# # Загрузите веса из файла
+# loaded_model.load_state_dict(torch.load('model.pth'))
+# # Убедитесь, что модель находится в режиме оценки
+# loaded_model.eval()
+
 model.to(device)
 
 optimizer = torch.optim.Adam(params=model.parameters())  # алгоритм оптимизации
@@ -242,26 +241,11 @@ if __name__ == '__main__':
     # Добавьте эту строку для исправления проблем с multiprocessing
     freeze_support()
     loss_track, accuracy_track = trainval(model, loaders, optimizer, epochs=30)
-
-    plt.plot(accuracy_track['training'], label='train')
-    plt.plot(accuracy_track['validation'], label='val')
-    plt.ylabel('accuracy')
-    plt.xlabel('epoch')
-    plt.grid()
-    plt.legend()
-
-    plt.plot(loss_track['training'], label='train')
-    plt.plot(loss_track['validation'], label='val')
-    plt.ylabel('loss')
-    plt.xlabel('epoch')
-    plt.grid()
-    plt.legend()
+    torch.save(model.state_dict(), 'model.pth')
 
 
     def predict(model, review, seq_length=200):
-        print(review)
         device = "cuda" if torch.cuda.is_available() else "cpu"
-
         _, words = preprocess(review.lower())
         encoded_words = [vocab_to_int[word] for word in words if word in vocab_to_int.keys()]
         padded_words = pad_text([encoded_words], seq_length)
