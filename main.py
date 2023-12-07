@@ -1,16 +1,17 @@
 from multiprocessing import freeze_support
-
+import pickle
 import numpy as np
-from string import punctuation
 from collections import Counter
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn as nn
 from tqdm import tqdm
 from review import Review
-from matplotlib import pyplot as plt
 
 import random
+
+from utils import preprocess
+
 random.seed(33)
 torch.manual_seed(0)
 reviews = []
@@ -18,52 +19,6 @@ all_texts = []
 all_words = []
 labels = []
 
-
-def preprocess(text):
-    """"
-    Функция чтобы очистить текст отзыва от пунктуации и выделить все слова
-    """
-    clear_text = "".join([s.lower() for s in text if s not in punctuation])  # убираем пунктуацию
-    text_words = clear_text.split()  # получаем массив слов
-    return clear_text, text_words
-
-
-# Считываем данные из файлов
-with open('dataset.csv', 'r', encoding='utf-8') as f:
-    dataset = f.read().split('\n')
-
-for item in dataset[1:-1]:
-    reviews.append(Review(item))
-
-for review in reviews:
-    clear_text, text_words = preprocess(review.text)
-    # print("!!!!!")
-    # print(clear_text)
-    # print(text_words)
-    all_texts.append(clear_text)
-    all_words.extend(text_words)
-    labels.append(review.label)
-
-
-# print('Общее число отзывов: ', len(all_texts))
-# print('Общее число слов: ', len(all_words))
-# print('Первые 2 отзыва: ', all_texts[:2])
-# print('Первые 5 слов: ', all_words[:5])
-
-
-corpus = Counter(all_words)
-# Отсортируем слова по встречаемости
-corpus_ = sorted(corpus,key=corpus.get,reverse=True)#[:1000]
-# кодируем каждое слово - присваиваем ему порядковый номер
-vocab_to_int = {w:i+1 for i,w in enumerate(corpus_)}
-
-# Кодируем все отзывы: последовательность слов --> последовательность чисел
-encoded_texts = []
-for sent in all_texts:
-  encoded_texts.append([vocab_to_int[word] for word in sent.lower().split()
-                                  if word in vocab_to_int.keys()])
-
-encoded_labels = [1 if label == "positive" else 0 for label in labels]
 
 def pad_text(encoded_texts, seq_length):
     padded = []
@@ -74,22 +29,6 @@ def pad_text(encoded_texts, seq_length):
             padded.append([0] * (seq_length - len(text)) + text)
 
     return np.array(padded)
-
-
-padded_texts = pad_text(encoded_texts, seq_length=200)
-
-
-train_set = TensorDataset(torch.from_numpy(padded_texts[:20000]), torch.from_numpy(np.array(encoded_labels[:20000])))
-val_set = TensorDataset(torch.from_numpy(padded_texts[20000:]), torch.from_numpy(np.array(encoded_labels[20000:])))
-
-batch_size = 50
-
-# train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-5000, 5000])
-loaders = {'training': DataLoader(train_set, batch_size, pin_memory=True,num_workers=2, shuffle=True),
-           'validation':DataLoader(val_set, batch_size, pin_memory=True,num_workers=2, shuffle=False)}
-
-
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
 class SentimentRNN(nn.Module):
@@ -132,24 +71,6 @@ class SentimentRNN(nn.Module):
         out = self.sig(out)
         # return last sigmoid output
         return out
-
-vocab_size = len(vocab_to_int) + 1
-embedding_dim = 100
-hidden_dim = 256
-num_layers = 1
-model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
-
-# # Создайте новый экземпляр модели с теми же параметрами
-# loaded_model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
-# # Загрузите веса из файла
-# loaded_model.load_state_dict(torch.load('model.pth'))
-# # Убедитесь, что модель находится в режиме оценки
-# loaded_model.eval()
-
-model.to(device)
-
-optimizer = torch.optim.Adam(params=model.parameters())  # алгоритм оптимизации
-lr = 0.001  # learning rate
 
 
 class ValueMeter(object):
@@ -240,34 +161,75 @@ def trainval(model, loaders, optimizer, epochs=5):
 if __name__ == '__main__':
     # Добавьте эту строку для исправления проблем с multiprocessing
     freeze_support()
-    loss_track, accuracy_track = trainval(model, loaders, optimizer, epochs=30)
-    torch.save(model.state_dict(), 'model.pth')
+    # Считываем данные из файлов
+    with open('dataset.csv', 'r', encoding='utf-8') as f:
+        dataset = f.read().split('\n')
+
+    for item in dataset[1:-1]:
+        reviews.append(Review(item))
+
+    for review in reviews:
+        clear_text, text_words = preprocess(review.text)
+        # print("!!!!!")
+        # print(clear_text)
+        # print(text_words)
+        all_texts.append(clear_text)
+        all_words.extend(text_words)
+        labels.append(review.label)
+
+    corpus = Counter(all_words)
+    # Отсортируем слова по встречаемости
+    corpus_ = sorted(corpus, key=corpus.get, reverse=True)  # [:1000]
+    # кодируем каждое слово - присваиваем ему порядковый номер
+    vocab_to_int = {w: i + 1 for i, w in enumerate(corpus_)}
+
+    # Кодируем все отзывы: последовательность слов --> последовательность чисел
+    encoded_texts = []
+    for sent in all_texts:
+        encoded_texts.append([vocab_to_int[word] for word in sent.lower().split()
+                              if word in vocab_to_int.keys()])
+
+    encoded_labels = [1 if label == "positive" else 0 for label in labels]
+
+    padded_texts = pad_text(encoded_texts, seq_length=200)
+
+    train_set = TensorDataset(torch.from_numpy(padded_texts[:20000]),
+                              torch.from_numpy(np.array(encoded_labels[:20000])))
+    val_set = TensorDataset(torch.from_numpy(padded_texts[20000:]), torch.from_numpy(np.array(encoded_labels[20000:])))
+
+    batch_size = 50
+
+    # train_set, val_set = torch.utils.data.random_split(dataset, [len(dataset)-5000, 5000])
+    loaders = {'training': DataLoader(train_set, batch_size, pin_memory=True, num_workers=2, shuffle=True),
+               'validation': DataLoader(val_set, batch_size, pin_memory=True, num_workers=2, shuffle=False)}
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    vocab_size = len(vocab_to_int) + 1
+    embedding_dim = 100
+    hidden_dim = 256
+    num_layers = 1
 
 
-    def predict(model, review, seq_length=200):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        _, words = preprocess(review.lower())
-        encoded_words = [vocab_to_int[word] for word in words if word in vocab_to_int.keys()]
-        padded_words = pad_text([encoded_words], seq_length)
-        padded_words = torch.from_numpy(padded_words).to(device)
-        bs = 1
-        model.eval()
-        zero_init = torch.zeros(num_layers, bs, hidden_dim).to(device)
-        h = tuple([zero_init, zero_init])
-        output = model(padded_words, h)
-        pred = torch.round(output.squeeze())
-        out = "This is a positive review." if pred == 1 else "This is a negative review."
-        print(out, '\n')
+    # Бинарная сериализация
+    with open('model/vocab.bin', 'wb') as bin_file:
+        pickle.dump(vocab_to_int, bin_file)
+
+    # model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
+
+    # Создайте новый экземпляр модели с теми же параметрами
+    # model = SentimentRNN(vocab_size, embedding_dim, hidden_dim, num_layers)
+    # Загрузите веса из файла
+    # model.load_state_dict(torch.load('model.pth'))
+    # Убедитесь, что модель находится в режиме оценки
+    # model.eval()
+
+    # model.to(device)
+
+    # optimizer = torch.optim.Adam(params=model.parameters())  # алгоритм оптимизации
+    # lr = 0.001  # learning rate
+
+    # loss_track, accuracy_track = trainval(model, loaders, optimizer, epochs=30)
+    # torch.save(model.state_dict(), 'model.pth')
 
 
-    review1 = "Twin Peaks is a very good film to watch with a family. Even five year old child will understand David Lynch masterpiece"
-    review2 = "It made me cry"
-    review3 = "It made me cry - I never seen such an awful acting before"
-    review4 = "Vulgarity. Ringing vulgarity"
-    review5 = "Garbage"
-
-    predict(model, review1)
-    predict(model, review2)
-    predict(model, review3)
-    predict(model, review4)
-    predict(model, review5)
